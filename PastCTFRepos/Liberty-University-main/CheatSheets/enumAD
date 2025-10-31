@@ -1,0 +1,64 @@
+If we have the AD credentials in the format of <username>:<password>, we can use Runas,
+ a legitimate Windows binary, to inject the credentials into memory. 
+
+runas.exe /netonly /user:<domain>\<username> cmd.exe
+
+
+
+Network folder on a domain controller is accessible by any authenticated AD account 
+and stores GPO information.
+
+/SYSVOL
+
+
+
+Microsoft Management Console (MMC)
+
+In gui desktop, go to search and type run. Then type domain name of AD network to see
+forest of AD network.
+
+    The GUI provides an excellent method to gain a holistic view of the AD environment.
+    Rapid searching of different AD objects can be performed.
+    It provides a direct method to view specific updates of AD objects.
+    If we have sufficient privileges, we can directly update existing AD objects or add new ones.
+
+
+Enumerating Through CMD
+
+The net command is a handy tool to enumerate information about the local system and AD. 
+
+net command to list all users in the AD domain.
+- net user /domain
+
+more info about AD User
+- net user <user> /domain
+
+enumerate Groups with net command
+- net group /domain
+
+expanding what users/computers are inside that Group
+- net group "<Group>" /domain
+
+Password Policy
+- net accounts /domain
+
+The net commands must be executed from a domain-joined machine. 
+
+
+PowerShell
+
+Enumerating more info about specific Users
+
+- Get-ADUser -Identity <User> -Server za.tryhackme.com -Properties *
+
+- Get-ADUser -Filter 'Name -like "*stevens"' -Server za.tryhackme.com | Format-Table Name,SamAccountName -A
+
+- Get-ADGroup -Identity Administrators -Server za.tryhackme.com
+
+Changing the password of our AD user by using the Set-ADAccountPassword cmdlet:
+
+- Set-ADAccountPassword -Identity gordon.stevens -Server za.tryhackme.com -OldPassword (ConvertTo-SecureString -AsPlaintext "old" -force) -NewPassword (ConvertTo-SecureString -AsPlainText "new" -Force)
+
+- Get-ADDomain - info about the domain itself
+
+

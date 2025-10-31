@@ -1,0 +1,58 @@
+Microsoft Management Console (MMC):
+Install instructions:
+
+
+Win + R to type in MMC to start.
+
+
+
+Change za.tryhack.me to the current domain in the above instructions. 
+
+
+Enumeration through CMD:
+#List all users in the domain
+net user  /domain 
+
+#List detailed information about specific user in the domain
+net user <username> /domain
+
+#List groups in the domain
+net group /domain
+
+#List specific members in a group
+net group <group name> /domain
+
+#List Password Policy
+net accounts /domain
+
+Enumeration through Powershell:
+#Get-Adusers to enumerate AD users
+Get-ADUser -Identity <username> -Server <domain> -Properties *
+
+#Enumerate AD groups
+Get-ADGroup -Identity <group name> -Server <domain>
+
+#Enumerate members in an AD group
+Get-ADGroupMember -Identity <group name> -Server <domain>
+
+#Info about our specific domain
+Get-ADDomain -Server <domain>
+
+Enumeration through Bloodhound:
+#Sharphound used to grab the data
+Sharphound.exe --CollectionMethods <methods> (Default or All) -Domain <domain> --ExcludeDCs
+	• CollectionMethods determines the type of data collection. Either Default or All or session
+	• Domain is the domain we are trying to enumerate
+	• ExcludeDCs tells Sharphound to ignore Domain Controllers since they have a higher likelihood of triggering an alert
+
+#Start Bloodhound
+bloodhound --no-sandbox
+
+#Start Neo4J
+neo4j console
+
+#Transfer Sharphound file from AD to Kali
+scp <AD Username>@<machine>.<domain>:<Path_to_Sharphound_Zip> .
+
+#Drag and drop the Zip file into bloodhound
+

